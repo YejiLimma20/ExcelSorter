@@ -433,9 +433,10 @@ function aggregateMultiLevel(columns) {
 const completionRateColumnLabel = 'Completion Rate (%)'
 
 const visibleColumns = computed(() => {
+  const originalOrder = state.columns.slice()
   const dims = new Set(requiredColumnLabels.filter((c) => state.columns.includes(c)))
-  const dimList = Array.from(dims)
-  let others = state.columns.filter((c) => !dims.has(c))
+  const dimList = originalOrder.filter((c) => dims.has(c))
+  let others = originalOrder.filter((c) => !dims.has(c))
   if (state.gradeLevelFilter) {
     others = others.filter((c) => {
       const lvl = getGradeLevelFromColumnHeader(c)
@@ -443,15 +444,37 @@ const visibleColumns = computed(() => {
     })
   }
   const order = { elem: 1, jhs: 2, shs: 3, '': 4 }
+  const categoryOrder = [
+    ['enrollment', 'enrolment', 'enrollee', 'enrollees', 'enrollement'],
+    ['completer', 'completers', 'promotee', 'promotees', 'promoted', 'graduate', 'graduates', 'promot'],
+    ['incomplete', 'inc'],
+    ['regular', 'reg'],
+    ['irregular', 'irreg'],
+    ['transferin', 'transin', 'transferredin'],
+    ['transferout', 'transout', 'transferredout'],
+    ['retained', 'retain', 'retainee', 'retention'],
+  ]
+  function categoryIndex(header) {
+    const k = normalizeHeader(header)
+    const hasTotal = k.includes('total') || k.includes('grand') || k.includes('overall') || k.includes('eosy') || k.includes('eoy')
+    if (!hasTotal) return 999
+    for (let i = 0; i < categoryOrder.length; i += 1) {
+      const tokens = categoryOrder[i]
+      if (tokens.some(t => k.includes(t))) return i
+    }
+    return 999
+  }
   const sortedOthers = others.slice().sort((a, b) => {
     const la = getGradeLevelFromColumnHeader(a) || ''
     const lb = getGradeLevelFromColumnHeader(b) || ''
     const pa = order[la] || 4
     const pb = order[lb] || 4
     if (pa !== pb) return pa - pb
-    const na = normalizeHeader(a)
-    const nb = normalizeHeader(b)
-    return na.localeCompare(nb)
+    const ia = categoryIndex(a)
+    const ib = categoryIndex(b)
+    if (ia !== ib) return ia - ib
+    // stable by original Excel order
+    return originalOrder.indexOf(a) - originalOrder.indexOf(b)
   })
   const columns = [...dimList, ...sortedOthers]
   if (!columns.includes(completionRateColumnLabel)) {
@@ -728,25 +751,24 @@ function findFallbackTotalColumn(normalizedColumns, metricTokens) {
 
 function getRowEnrollment(row) {
   const enrollmentColumn = measureColumns.value.totalEnrollment
+  const level = getRowGradeLevel(row)
+  if (level !== 'shs') {
+    return enrollmentColumn ? parseNumber(row[enrollmentColumn]) : 0
+  }
+  // Preserve previous SHS fallback behavior
   let enrollment = enrollmentColumn ? parseNumber(row[enrollmentColumn]) : 0
-
   if (enrollment === 0) {
     const normalizedCols = state.columns.map((c) => normalizeHeader(c))
     const fallbackTotal = findFallbackTotalColumn(normalizedCols, ['enroll', 'enrol'])
-    if (fallbackTotal) {
-      enrollment = parseNumber(row[fallbackTotal])
-    }
+    if (fallbackTotal) enrollment = parseNumber(row[fallbackTotal])
   }
-
   if (enrollment === 0) {
     let sum = 0
     for (const col of state.columns) {
       const lowCol = normalizeHeader(col)
       const isTotalLike = totalVariationTokens.some((t) => lowCol.includes(t))
       const isMetric = lowCol.includes('enroll') || lowCol.includes('enrol')
-      if (isMetric && !lowCol.includes('rate') && !isTotalLike) {
-        sum += parseNumber(row[col])
-      }
+      if (isMetric && !lowCol.includes('rate') && !isTotalLike) sum += parseNumber(row[col])
     }
     enrollment = sum
   }
@@ -755,38 +777,33 @@ function getRowEnrollment(row) {
 
 function getRowCompleters(row) {
   const completersColumn = measureColumns.value.totalCompleters
+  const level = getRowGradeLevel(row)
+  if (level !== 'shs') {
+    return completersColumn ? parseNumber(row[completersColumn]) : 0
+  }
+  // Preserve previous SHS fallback behavior
   let completers = completersColumn ? parseNumber(row[completersColumn]) : 0
-
   if (completers === 0) {
     const normalizedCols = state.columns.map((c) => normalizeHeader(c))
     const fallbackTotal = findFallbackTotalColumn(normalizedCols, ['completer', 'promot', 'graduat'])
-    if (fallbackTotal) {
-      completers = parseNumber(row[fallbackTotal])
-    }
+    if (fallbackTotal) completers = parseNumber(row[fallbackTotal])
   }
-
   if (completers === 0) {
     let sum = 0
     for (const col of state.columns) {
       const lowCol = normalizeHeader(col)
       const isTotalLike = totalVariationTokens.some((t) => lowCol.includes(t))
       const isMetric = lowCol.includes('completer') || lowCol.includes('promot') || lowCol.includes('graduat')
-      if (isMetric && !lowCol.includes('rate') && !isTotalLike) {
-        sum += parseNumber(row[col])
-      }
+      if (isMetric && !lowCol.includes('rate') && !isTotalLike) sum += parseNumber(row[col])
     }
     completers = sum
   }
-
   if (completers === 0) {
     for (const col of state.columns) {
       const lowCol = normalizeHeader(col)
       if ((lowCol.includes('completer') || lowCol.includes('promot') || lowCol.includes('graduat')) && !lowCol.includes('rate')) {
         const val = parseNumber(row[col])
-        if (val > 0) {
-          completers = val
-          break
-        }
+        if (val > 0) { completers = val; break }
       }
     }
   }
@@ -809,27 +826,25 @@ function sumByTokens(row, tokens) {
 
 function getRowByMeasure(row, id, tokens) {
   const col = measureColumns.value[id]
+  const level = getRowGradeLevel(row)
+  if (level !== 'shs') {
+    return col ? parseNumber(row[col]) : 0
+  }
+  // Preserve previous SHS fallback behavior
   let val = col ? parseNumber(row[col]) : 0
   if (val === 0) {
     const normalizedCols = state.columns.map((c) => normalizeHeader(c))
     const fb = findFallbackTotalColumn(normalizedCols, tokens)
-    if (fb) {
-      val = parseNumber(row[fb])
-    }
+    if (fb) val = parseNumber(row[fb])
   }
-  if (val === 0) {
-    val = sumByTokens(row, tokens)
-  }
+  if (val === 0) val = sumByTokens(row, tokens)
   if (val === 0) {
     for (const c of state.columns) {
       const k = normalizeHeader(c)
       const match = tokens.some((t) => k.includes(t))
       if (match && !k.includes('rate')) {
         const v = parseNumber(row[c])
-        if (v > 0) {
-          val = v
-          break
-        }
+        if (v > 0) { val = v; break }
       }
     }
   }
