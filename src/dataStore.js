@@ -464,6 +464,18 @@ const visibleColumns = computed(() => {
     }
     return 999
   }
+  // Remove generic total columns that don't belong to any category
+  others = others.filter((c) => {
+    const idx = categoryIndex(c)
+    const k = normalizeHeader(c)
+    const isTotalish = k.includes('total') || k.includes('grand') || k.includes('overall') || k.includes('eosy') || k.includes('eoy')
+    const isGender = ['male', 'female', 'boys', 'girls'].some(t => k.includes(t))
+    const isGrade = k.includes('grade') || /g[0-9]/.test(k)
+    if (isTotalish && !isGender && !isGrade) {
+      return idx !== 999
+    }
+    return true
+  })
   const sortedOthers = others.slice().sort((a, b) => {
     const la = getGradeLevelFromColumnHeader(a) || ''
     const lb = getGradeLevelFromColumnHeader(b) || ''
