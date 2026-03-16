@@ -66,6 +66,12 @@ function getGradeLevelClass(column) {
   return getGradeLevelFromColumnHeader(column) || ''
 }
 
+function formatCompletionRate(row) {
+  const rate = getRowCompletionRate(row)
+  if (rate == null || !Number.isFinite(rate)) return '—'
+  return `${rate.toFixed(2)}%`
+}
+
 function handleGlobalSearch(event) {
   setGlobalSearch(event.target.value)
 }
@@ -272,7 +278,7 @@ function clearSort(column) {
               >
                 <template v-if="column === completionRateColumnLabel">
                   <span>
-                    {{ getRowCompletionRate(row).toFixed(2) }}%
+                    {{ formatCompletionRate(row) }}
                   </span>
                 </template>
                 <template v-else>

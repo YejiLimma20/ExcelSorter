@@ -294,7 +294,7 @@ const filteredRows = computed(() => {
       if (!value) continue
       let cell = row[column]
       if (column === completionRateColumnLabel) {
-        cell = `${getRowCompletionRate(row).toFixed(2)}%`
+        cell = formatRowCompletionRate(row)
       }
       if (cell == null) return false
       if (!String(cell).toLowerCase().includes(String(value).toLowerCase())) {
@@ -305,7 +305,7 @@ const filteredRows = computed(() => {
       if (!filterValue || !Array.isArray(filterValue) || !filterValue.length) continue
       let cell = row[column]
       if (column === completionRateColumnLabel) {
-        cell = `${getRowCompletionRate(row).toFixed(2)}%`
+        cell = formatRowCompletionRate(row)
       }
       const cellString = cell == null ? '' : String(cell)
       if (!filterValue.includes(cellString)) return false
@@ -369,7 +369,7 @@ const columnDistinctValues = computed(() => {
   const rowsToUse = filteredRows.value.length > 0 ? filteredRows.value : state.rows
   
   // Cache the completion rates to avoid re-calculating for every column
-  const completionRates = rowsToUse.map(row => `${getRowCompletionRate(row).toFixed(2)}%`)
+  const completionRates = rowsToUse.map((row) => formatRowCompletionRate(row))
   
   for (const column of allCols) {
     const values = new Set()
@@ -684,8 +684,7 @@ const measureColumns = computed(() => {
     const matchesDef = def.keys.some((key) => {
       return (
         headerKey === key ||
-        headerKey.includes(key) ||
-        key.includes(headerKey)
+        headerKey.includes(key)
       )
     })
     if (!matchesDef) return -Infinity
@@ -726,7 +725,7 @@ const measureColumns = computed(() => {
       }
     })
 
-    if (bestIndex !== -1 && bestScore > -Infinity) {
+    if (bestIndex !== -1 && bestScore >= 10) {
       result[def.id] = state.columns[bestIndex]
     }
   }
@@ -880,11 +879,101 @@ function getRowRetained(row) {
 }
 
 function getRowCompletionRate(row) {
-  const enrollment = getRowEnrollment(row)
-  const completers = getRowCompleters(row)
-  
-  if (enrollment <= 0) return 0
-  return (completers / enrollment) * 100
+  if (!state.columns.length) return null
+
+  const isPresentCell = (value) => value !== null && value !== undefined && value !== ''
+  const isGenderKey = (k) => ['male', 'female', 'boys', 'girls'].some((t) => k.includes(t))
+  const isRateKey = (k) => k.includes('rate')
+
+  const enrollmentTokens = ['enroll', 'enrol']
+  const completerTokens = ['completer', 'promot', 'graduat']
+
+  const normalizedCols = state.columns.map((c) => normalizeHeader(c))
+
+  const findOverallColumn = (tokens) => {
+    for (let i = 0; i < state.columns.length; i += 1) {
+      const col = state.columns[i]
+      const k = normalizedCols[i] || ''
+      if (isRateKey(k) || isGenderKey(k)) continue
+      if (getGradeLevelFromNormalizedKey(k)) continue
+      if (isOverallTotalColumn(k, tokens)) return col
+    }
+    return null
+  }
+
+  const overallEnrollmentCol = findOverallColumn(enrollmentTokens)
+  const overallCompletersCol = findOverallColumn(completerTokens)
+
+  const overallEnrollmentHas = overallEnrollmentCol ? isPresentCell(row[overallEnrollmentCol]) : false
+  const overallCompletersHas = overallCompletersCol ? isPresentCell(row[overallCompletersCol]) : false
+
+  if (overallEnrollmentHas && overallCompletersHas) {
+    const enrollment = parseNumber(row[overallEnrollmentCol])
+    if (enrollment <= 0) return null
+    const completers = parseNumber(row[overallCompletersCol])
+    return (completers / enrollment) * 100
+  }
+
+  const levels = ['elem', 'jhs', 'shs']
+
+  let enrollmentTotal = 0
+  let completersTotal = 0
+  let includedAny = false
+
+  for (const level of levels) {
+    const candidateEnrollmentCols = []
+    const candidateCompleterCols = []
+
+    for (let i = 0; i < state.columns.length; i += 1) {
+      const col = state.columns[i]
+      const k = normalizedCols[i] || ''
+      const colLevel = getGradeLevelFromNormalizedKey(k)
+      if (colLevel !== level) continue
+      if (isRateKey(k) || isGenderKey(k)) continue
+
+      if (enrollmentTokens.some((t) => k.includes(t))) candidateEnrollmentCols.push(col)
+      if (completerTokens.some((t) => k.includes(t))) candidateCompleterCols.push(col)
+    }
+
+    const enrollmentColsWithData = candidateEnrollmentCols.filter((c) => isPresentCell(row[c]))
+    const completerColsWithData = candidateCompleterCols.filter((c) => isPresentCell(row[c]))
+
+    if (!enrollmentColsWithData.length || !completerColsWithData.length) continue
+
+    const enrollmentTotalCols = enrollmentColsWithData.filter((c) => totalVariationTokens.some((t) => normalizeHeader(c).includes(t)))
+    const completerTotalCols = completerColsWithData.filter((c) => totalVariationTokens.some((t) => normalizeHeader(c).includes(t)))
+
+    const enrollment = enrollmentTotalCols.length
+      ? Math.max(...enrollmentTotalCols.map((c) => parseNumber(row[c])))
+      : enrollmentColsWithData.reduce((sum, c) => sum + parseNumber(row[c]), 0)
+
+    const completers = completerTotalCols.length
+      ? Math.max(...completerTotalCols.map((c) => parseNumber(row[c])))
+      : completerColsWithData.reduce((sum, c) => sum + parseNumber(row[c]), 0)
+
+    if (enrollment <= 0) continue
+
+    includedAny = true
+    enrollmentTotal += enrollment
+    completersTotal += completers
+  }
+
+  if (!includedAny) {
+    const enrollment = getRowEnrollment(row)
+    const completers = getRowCompleters(row)
+    if (enrollment <= 0) return null
+    if (overallCompletersHas || completers > 0) return (completers / enrollment) * 100
+    return null
+  }
+
+  if (enrollmentTotal <= 0) return null
+  return (completersTotal / enrollmentTotal) * 100
+}
+
+function formatRowCompletionRate(row) {
+  const rate = getRowCompletionRate(row)
+  if (rate == null || !Number.isFinite(rate)) return ''
+  return `${rate.toFixed(2)}%`
 }
 
 const aggregatedTotals = computed(() => {

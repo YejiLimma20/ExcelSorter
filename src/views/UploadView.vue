@@ -447,11 +447,20 @@ function readFile(file) {
       const isElemGrade = (hk) =>
         hasGradeToken(hk, 1) || hasGradeToken(hk, 2) || hasGradeToken(hk, 3) ||
         hasGradeToken(hk, 4) || hasGradeToken(hk, 5) || hasGradeToken(hk, 6) ||
-        hk.includes('kinder') || hk.includes('kindergarten')
+        hk.includes('kinder') || hk.includes('kindergarten') ||
+        hk.includes('kgarten') || hk.includes('kindergarden') ||
+        hk.includes('prep') || hk.includes('nursery') ||
+        /^k(male|female|enroll|promot|trans|late|cond|retain)/.test(hk) ||
+        hk.includes('ngelem') || hk.includes('ng elem')
       const isJhsGrade = (hk) =>
-        hasGradeToken(hk, 7) || hasGradeToken(hk, 8) || hasGradeToken(hk, 9) || hasGradeToken(hk, 10)
+        hasGradeToken(hk, 7)  || hasGradeToken(hk, 8) ||
+        hasGradeToken(hk, 9)  || hasGradeToken(hk, 10) ||
+        hk.includes('ngsecond') || hk.includes('ng second') ||
+        hk.includes('ngsec')
       const isShsGrade = (hk) =>
-        hasGradeToken(hk, 11) || hasGradeToken(hk, 12)
+        hasGradeToken(hk, 11) || hasGradeToken(hk, 12) ||
+        /\b11th\b/.test(hk) || /\b12th\b/.test(hk) ||
+        hk.includes('gr11') || hk.includes('gr12')
 
       const specHeaderMap = shsTotalSpecs.map(spec => {
         const components = allHeaders.filter(h => {
@@ -459,26 +468,46 @@ function readFile(file) {
           const isGradeLevel = isShsGrade(hk)
           const isShsTotal = hk.includes('shs') || hk.includes('seniorhigh')
           const matchesSpec = spec.keys.some(k => hk.includes(k))
+          const isConditional = hk.includes('cond')
 
           // We want columns that are grade-level specific for this category
           // but NOT the combined SHS total itself
-          return isGradeLevel && matchesSpec && !isShsTotal
+          return isGradeLevel && matchesSpec && !isConditional && !isShsTotal
         })
 
         // Find if the total already exists in headers (detect variations: Total, EOSY Total, Grand Total, Overall Total)
         const totalVariationTokens = ['total', 'all', 'eosy', 'grand', 'overall']
         const isGenderColumn = (hk) => ['male', 'female', 'boys', 'girls'].some(t => hk.includes(t))
+        const expandedMetricKeys = [...spec.keys, 'enrollment', 'enrollee', 'enrolled', 'completers', 'completed', 'graduate', 'promoted', 'transferin', 'transferout', 'trans in', 'trans out', 'lateenrollee', 'late enrollee']
+        const shsLevelKeywords = ['shs', 'senior', 'seniorhigh', 'grade11', 'grade 11', 'g11', 'seniorhighschool', 'strand']
+
         const candidates = headers.filter(h => {
           const hk = normalizedHeaderMap.get(h)
-          const matchesSpec = spec.keys.some(k => hk.includes(k))
+          const matchesSpec = expandedMetricKeys.some(k => hk.includes(k))
+          const isConditional = hk.includes('cond')
           const hasTotalVariation = totalVariationTokens.some(t => hk.includes(t))
-          return matchesSpec && hasTotalVariation && !isGenderColumn(hk)
+          return matchesSpec && hasTotalVariation && !isGenderColumn(hk) && !isConditional
         })
         // Only accept SHS-specific totals; otherwise null to avoid cross-level collisions
-        const existingTotalHeader = candidates.find(h => {
+        let existingTotalHeader = candidates.find(h => {
           const hk = normalizedHeaderMap.get(h)
-          return hk.includes('shs') || hk.includes('seniorhigh')
+          return shsLevelKeywords.some(lk => hk.includes(lk)) &&
+                 spec.keys.some(k => hk.includes(k))
         }) || null
+
+        // Step 3: Fallback Total Search
+        if (!existingTotalHeader) {
+          const fallbackTotal = allHeaders.find(h => {
+            const hk = normalizedHeaderMap.get(h)
+            const matchesSpec = expandedMetricKeys.some(k => hk.includes(k))
+            const isConditional = hk.includes('cond')
+            const hasTotal = ['total', 'grand', 'overall', 'eosy'].some(t => hk.includes(t))
+            return matchesSpec && hasTotal && !isConditional
+          })
+          if (fallbackTotal) {
+            existingTotalHeader = fallbackTotal
+          }
+        }
 
         return { ...spec, components, existingTotalHeader }
       })
@@ -486,46 +515,88 @@ function readFile(file) {
         const components = allHeaders.filter(h => {
           const hk = normalizedHeaderMap.get(h)
           const isGradeLevel = isJhsGrade(hk)
-          const isJhsTotal = hk.includes('jhs') || hk.includes('juniorhigh')
+          const isJhsTotal = (hk.includes('jhs') || hk.includes('junior') || hk.includes('second')) && !hk.includes('ngsecond')
           const matchesSpec = spec.keys.some(k => hk.includes(k))
-          return isGradeLevel && matchesSpec && !isJhsTotal
+          const isConditional = hk.includes('cond')
+          return isGradeLevel && matchesSpec && !isConditional && !isJhsTotal
         })
         const totalVariationTokens = ['total', 'all', 'eosy', 'grand', 'overall']
         const isGenderColumn = (hk) => ['male', 'female', 'boys', 'girls'].some(t => hk.includes(t))
+        const expandedMetricKeys = [...spec.keys, 'enrollment', 'enrollee', 'enrolled', 'completers', 'completed', 'graduate', 'promoted', 'transferin', 'transferout', 'trans in', 'trans out', 'lateenrollee', 'late enrollee']
+        const jhsLevelKeywords = ['jhs', 'junior', 'juniorhigh', 'grade7', 'grade 7', 'g7', 'grade8', 'secondary', 'high school']
+
         const candidates = headers.filter(h => {
           const hk = normalizedHeaderMap.get(h)
-          const matchesSpec = spec.keys.some(k => hk.includes(k))
+          const matchesSpec = expandedMetricKeys.some(k => hk.includes(k))
+          const isConditional = hk.includes('cond')
           const hasTotalVariation = totalVariationTokens.some(t => hk.includes(t))
-          return matchesSpec && hasTotalVariation && !isGenderColumn(hk)
+          return matchesSpec && hasTotalVariation && !isGenderColumn(hk) && !isConditional
         })
-        const existingTotalHeader = candidates.find(h => {
+        let existingTotalHeader = candidates.find(h => {
           const hk = normalizedHeaderMap.get(h)
-          return hk.includes('jhs') || hk.includes('juniorhigh')
+          return jhsLevelKeywords.some(lk => hk.includes(lk)) &&
+                 spec.keys.some(k => hk.includes(k))
         }) || null
+
+        // Step 3: Fallback Total Search
+        if (!existingTotalHeader) {
+          const fallbackTotal = allHeaders.find(h => {
+            const hk = normalizedHeaderMap.get(h)
+            const matchesSpec = expandedMetricKeys.some(k => hk.includes(k))
+            const isConditional = hk.includes('cond')
+            const hasTotal = ['total', 'grand', 'overall', 'eosy'].some(t => hk.includes(t))
+            return matchesSpec && hasTotal && !isConditional
+          })
+          if (fallbackTotal) {
+            existingTotalHeader = fallbackTotal
+          }
+        }
         return { ...spec, components, existingTotalHeader }
       })
       const specHeaderMapElem = elemTotalSpecs.map(spec => {
         const components = allHeaders.filter(h => {
           const hk = normalizedHeaderMap.get(h)
           const isGradeLevel = isElemGrade(hk)
-          const isElemTotal = hk.includes('elem') || hk.includes('elementary') || hk.includes('primary')
+          const isElemTotal = (hk.includes('elem') || hk.includes('elementary')) && !hk.includes('ngelem')
           const matchesSpec = spec.keys.some(k => hk.includes(k))
-          return isGradeLevel && matchesSpec && !isElemTotal
+          const isConditional = hk.includes('cond')
+          return isGradeLevel && matchesSpec && !isConditional && !isElemTotal
         })
         const totalVariationTokens = ['total', 'all', 'eosy', 'grand', 'overall']
         const isGenderColumn = (hk) => ['male', 'female', 'boys', 'girls'].some(t => hk.includes(t))
+        const expandedMetricKeys = [...spec.keys, 'enrollment', 'enrollee', 'enrolled', 'completers', 'completed', 'graduate', 'promoted', 'transferin', 'transferout', 'trans in', 'trans out', 'lateenrollee', 'late enrollee']
+        const elemLevelKeywords = ['elem', 'elementary', 'primary', 'element', 'kinder', 'grade1', 'grade 1', 'g1']
+
         const candidates = headers.filter(h => {
           const hk = normalizedHeaderMap.get(h)
-          const matchesSpec = spec.keys.some(k => hk.includes(k))
+          const matchesSpec = expandedMetricKeys.some(k => hk.includes(k))
+          const isConditional = hk.includes('cond')
           const hasTotalVariation = totalVariationTokens.some(t => hk.includes(t))
-          return matchesSpec && hasTotalVariation && !isGenderColumn(hk)
+          return matchesSpec && hasTotalVariation && !isGenderColumn(hk) && !isConditional
         })
-        const existingTotalHeader = candidates.find(h => {
+        let existingTotalHeader = candidates.find(h => {
           const hk = normalizedHeaderMap.get(h)
-          return hk.includes('elem') || hk.includes('elementary') || hk.includes('primary')
+          return elemLevelKeywords.some(lk => hk.includes(lk)) &&
+                 spec.keys.some(k => hk.includes(k))
         }) || null
+
+        // Step 3: Fallback Total Search
+        if (!existingTotalHeader) {
+          const fallbackTotal = allHeaders.find(h => {
+            const hk = normalizedHeaderMap.get(h)
+            const matchesSpec = expandedMetricKeys.some(k => hk.includes(k))
+            const isConditional = hk.includes('cond')
+            const hasTotal = ['total', 'grand', 'overall', 'eosy'].some(t => hk.includes(t))
+            return matchesSpec && hasTotal && !isConditional
+          })
+          if (fallbackTotal) {
+            existingTotalHeader = fallbackTotal
+          }
+        }
         return { ...spec, components, existingTotalHeader }
       })
+
+
 
       const processedRows = rows.map((row) => {
         const rowCopy = { ...row }
@@ -533,12 +604,13 @@ function readFile(file) {
         function applySpecTotals(map) {
           for (const specInfo of map) {
             const { label, existingTotalHeader, components } = specInfo
-            let currentVal = 0
+            let currentVal = null
             if (existingTotalHeader) {
-              currentVal = Number(rowCopy[existingTotalHeader]) || 0
+              const raw = Number(rowCopy[existingTotalHeader])
+              currentVal = Number.isFinite(raw) ? raw : null
             }
             if (components.length > 0) {
-              if (currentVal === 0) {
+              if (currentVal === null) {
                 let sum = 0
                 let hasAtLeastOneValue = false
                 for (const h of components) {
