@@ -81,9 +81,32 @@ function buildConfig() {
         text: props.title,
       },
       tooltip: {
-        mode: 'index',
-        intersect: false,
-      },
+          mode: 'index',
+          intersect: false,
+          callbacks: {
+            title: function(context) {
+              if (!context || !context.length) return ''
+              return context[0].label || ''
+            },
+            label: function(context) {
+              let label = context.dataset.label || ''
+              if (label) {
+                label += ': '
+              }
+              const val = props.indexAxis === 'y' ? context.parsed.x : context.parsed.y
+              if (val != null && Number.isFinite(val)) {
+                label += val.toFixed(2)
+              } else {
+                label += '0.00'
+              }
+              
+              if (props.maxValue === 100) {
+                label += '%'
+              }
+              return label
+            }
+          }
+        },
     },
   }
   if (isBar) {
@@ -97,6 +120,12 @@ function buildConfig() {
     options.scales = {
       [categoryAxis]: {
         stacked: props.stacked,
+        ticks: {
+          autoSkip: false,
+          font: {
+            size: 10,
+          }
+        }
       },
       [numericAxis]: {
         stacked: props.stacked,
@@ -172,7 +201,8 @@ function exportImage() {
 <template>
   <div class="chart-wrapper">
     <div class="chart-header">
-      <div class="chart-title">{{ title }}</div>
+      <div v-if="title" class="chart-title">{{ title }}</div>
+      <div v-else></div>
       <button type="button" class="button button-ghost" @click="exportImage">
         Export PNG
       </button>

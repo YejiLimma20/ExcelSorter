@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
+import * as XLSX from 'xlsx'
 import { useDataStore } from '../dataStore'
 import ColumnFilterMenu from './ColumnFilterMenu.vue'
 
@@ -9,6 +10,8 @@ const {
   completionRateColumnLabel,
   getRowCompletionRate,
   pagedRows,
+  sortedRows,
+  filteredSortedRows,
   totalPages,
   setGlobalSearch,
   setColumnFilter,
@@ -23,6 +26,32 @@ const {
 const hasData = computed(() => state.rows.length > 0)
 const openColumn = ref('')
 const zoomLevel = ref(1)
+
+function downloadExcel() {
+  const rowsToExport = filteredSortedRows.value
+  if (!rowsToExport.length) return
+
+  const exportRows = rowsToExport.map(row => {
+    const obj = {}
+    visibleColumns.value.forEach(col => {
+      let value = row[col]
+      if (col === completionRateColumnLabel) {
+        const rate = getRowCompletionRate(row)
+        value = rate != null && Number.isFinite(rate) ? `${rate.toFixed(2)}%` : ''
+      }
+      obj[col] = value ?? ''
+    })
+    return obj
+  })
+
+  const ws = XLSX.utils.json_to_sheet(exportRows)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Export')
+  
+  const date = new Date().toISOString().split('T')[0]
+  const filename = `export_${date}.xlsx`
+  XLSX.writeFile(wb, filename)
+}
 
 function zoomIn() {
   if (zoomLevel.value < 1.5) {
@@ -132,16 +161,26 @@ function clearSort(column) {
   <div class="table-container">
     <div class="table-toolbar">
       <div class="toolbar-left">
-        <label class="field-label">
-          <span>Global search</span>
-          <input
-            type="text"
-            class="input"
-            placeholder="Search all columns"
-            :value="state.globalSearch"
-            @input="handleGlobalSearch"
-          />
-        </label>
+        <div class="toolbar-group">
+          <label class="field-label">
+            <span>Global search</span>
+            <input
+              type="text"
+              class="input"
+              placeholder="Search all columns"
+              :value="state.globalSearch"
+              @input="handleGlobalSearch"
+            />
+          </label>
+          <button
+            type="button"
+            class="button button-primary download-button"
+            :disabled="!filteredSortedRows.length"
+            @click="downloadExcel"
+          >
+            Download Excel
+          </button>
+        </div>
       </div>
       <div class="toolbar-right">
         <div class="toolbar-actions">
@@ -316,3 +355,24 @@ function clearSort(column) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.toolbar-group {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.download-button {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.table-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+</style>

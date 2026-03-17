@@ -20,31 +20,6 @@ const {
 } = useDataStore()
 
 // Dashboard Logic
-const chartTypes = [
-  { value: 'bar', label: 'Bar' },
-  { value: 'pie', label: 'Pie' },
-  { value: 'line', label: 'Line' },
-  { value: 'stacked-bar', label: 'Stacked bar' },
-]
-
-const dimensionOptions = computed(() => state.columns)
-
-const selectedDimension = ref('')
-const selectedChartType = ref('bar')
-const selectedStackSeriesDimension = ref('')
-
-// Watch for column changes to set defaults
-watch(() => state.columns, (newCols) => {
-  if (newCols.length > 0) {
-    if (!selectedDimension.value) {
-      selectedDimension.value = newCols.includes('Region') ? 'Region' : newCols[0]
-    }
-    if (!selectedStackSeriesDimension.value && newCols.length > 1) {
-      selectedStackSeriesDimension.value = newCols.includes('School Type') ? 'School Type' : newCols[1]
-    }
-  }
-}, { immediate: true })
-
 // Initialize defaults once columns are available
 const hasData = computed(() => state.rows.length > 0)
 
@@ -79,25 +54,6 @@ const totalTransferOut = computed(() => aggregatedTotals.value.totalTransferOut)
 const totalLateEnrollees = computed(() => aggregatedTotals.value.totalLateEnrollees)
 const totalRetained = computed(() => aggregatedTotals.value.totalRetained)
 
-function buildSingleSeriesConfig(column, label) {
-  if (!column || !state.columns.includes(column)) {
-    return { labels: [], datasets: [] }
-  }
-  const data = aggregateCountByColumn(column)
-  const labels = data.map((item) => item.label)
-  const values = data.map((item) => item.value)
-  return {
-    labels,
-    datasets: [
-      {
-        label,
-        data: values,
-        backgroundColor: buildColors(values.length, 0.7),
-      },
-    ],
-  }
-}
-
 function buildColors(count, alpha) {
   const base = [
     [59, 130, 246], [16, 185, 129], [234, 179, 8], [239, 68, 68], [168, 85, 247],
@@ -111,109 +67,49 @@ function buildColors(count, alpha) {
   return colors
 }
 
-const regionBarConfig = computed(() => buildSingleSeriesConfig('Region', 'Schools per region'))
-const sectorPieConfig = computed(() => buildSingleSeriesConfig('Sector', 'Schools per sector'))
-
-const schoolTypePerRegionConfig = computed(() => {
-  const regionColumn = 'Region'
-  const typeColumn = 'School Type'
-  if (!state.columns.includes(regionColumn) || !state.columns.includes(typeColumn)) {
-    return { labels: [], datasets: [] }
-  }
-  const regionLabels = []
-  const typeKeys = new Set()
-  const matrix = {}
-  for (const row of filteredRows.value) {
-    const region = row[regionColumn] || 'Unknown'
-    const schoolType = row[typeColumn] || 'Unknown'
-    if (!regionLabels.includes(region)) regionLabels.push(region)
-    typeKeys.add(schoolType)
-    const key = `${region}|||${schoolType}`
-    matrix[key] = (matrix[key] || 0) + 1
-  }
-  const typeLabels = Array.from(typeKeys)
-  const colors = buildColors(typeLabels.length, 0.7)
-  const datasets = typeLabels.map((typeLabel, index) => {
-    const data = regionLabels.map((region) => matrix[`${region}|||${typeLabel}`] || 0)
-    return { label: typeLabel, data, backgroundColor: colors[index] }
-  })
-  return { labels: regionLabels, datasets }
-})
-
-const userChartConfig = computed(() => {
-  const dimension = selectedDimension.value
-  const type = selectedChartType.value
-  const seriesDimension = selectedStackSeriesDimension.value
-  if (!dimension || !state.columns.includes(dimension)) {
-    return { type, stacked: false, labels: [], datasets: [] }
-  }
-  if (type === 'stacked-bar' && seriesDimension && state.columns.includes(seriesDimension)) {
-    const labels = []
-    const seriesKeys = new Set()
-    const matrix = {}
-    for (const row of filteredRows.value) {
-      const dimValue = row[dimension] || 'Unknown'
-      const seriesValue = row[seriesDimension] || 'Unknown'
-      if (!labels.includes(dimValue)) labels.push(dimValue)
-      seriesKeys.add(seriesValue)
-      const key = `${dimValue}|||${seriesValue}`
-      matrix[key] = (matrix[key] || 0) + 1
-    }
-    const seriesLabels = Array.from(seriesKeys)
-    const colors = buildColors(seriesLabels.length, 0.7)
-    const datasets = seriesLabels.map((seriesLabel, index) => {
-      const data = labels.map((dimValue) => matrix[`${dimValue}|||${seriesLabel}`] || 0)
-      return { label: seriesLabel, data, backgroundColor: colors[index] }
-    })
-    return { type: 'bar', stacked: true, labels, datasets }
-  }
-  const config = buildSingleSeriesConfig(dimension, `Count by ${dimension}`)
-  return { type, stacked: false, labels: config.labels, datasets: config.datasets }
-})
-
 const completionTableRows = computed(() => schoolLevelMetrics.value)
 
-// Pagination for completion-rate-per-school chart to avoid overwhelming number of bars
-const completionChartPageSize = 20
-const completionChartPage = ref(1)
+const completionChartOrientation = ref('y')
+const orientationOptions = [
+  { value: 'x', label: 'Vertical' },
+  { value: 'y', label: 'Horizontal' },
+]
 
+// Use the data store's paging and sorting directly for the chart
 const pagedCompletionRows = computed(() => {
+  // We need to group the paged rows by school since the table is at the row level
+  // but the chart is at the school level.
+  // However, schoolLevelMetrics is already grouped and respects sorting.
+  // So we just need to slice schoolLevelMetrics using the same logic as pagedRows.
+  
   const rows = schoolLevelMetrics.value
   if (!rows.length) return []
-  const start = (completionChartPage.value - 1) * completionChartPageSize
-  return rows.slice(start, start + completionChartPageSize)
+  
+  // To match "paging just like on the data table", we use the store's current page and page size
+  const start = (state.currentPage - 1) * state.pageSize
+  return rows.slice(start, start + state.pageSize)
 })
 
-const completionChartTotalPages = computed(() => {
-  const rows = schoolLevelMetrics.value
-  if (!rows.length) return 1
-  return Math.max(1, Math.ceil(rows.length / completionChartPageSize))
-})
-
-function goToPrevCompletionChartPage() {
-  if (completionChartPage.value > 1) {
-    completionChartPage.value -= 1
-  }
-}
-
-function goToNextCompletionChartPage() {
-  if (completionChartPage.value < completionChartTotalPages.value) {
-    completionChartPage.value += 1
-  }
-}
+const completionChartTotalPages = computed(() => totalPages.value)
 
 const completionRatePerSchoolConfig = computed(() => {
   const rows = pagedCompletionRows.value
   if (!rows.length) return { labels: [], datasets: [] }
   const labels = rows.map((row) => row.school)
   const values = rows.map((row) => Number.isFinite(row.completionRate) ? row.completionRate : 0)
+  
+  // Re-generate colors based on the current data to ensure consistency
+  const colors = buildColors(values.length, 0.7)
+  
   return {
     labels,
     datasets: [
       {
         label: 'Completion rate (%)',
         data: values,
-        backgroundColor: buildColors(values.length, 0.7),
+        backgroundColor: colors,
+        borderColor: colors.map(c => c.replace('0.7', '1')),
+        borderWidth: 1,
       },
     ],
   }
@@ -460,14 +356,25 @@ function readFile(file) {
       const isShsGrade = (hk) =>
         hasGradeToken(hk, 11) || hasGradeToken(hk, 12) ||
         /\b11th\b/.test(hk) || /\b12th\b/.test(hk) ||
-        hk.includes('gr11') || hk.includes('gr12')
+        hk.includes('gr11') || hk.includes('gr12') ||
+        hk.includes('g11') || hk.includes('g12')
 
       const specHeaderMap = shsTotalSpecs.map(spec => {
         const components = allHeaders.filter(h => {
           const hk = normalizedHeaderMap.get(h)
           const isGradeLevel = isShsGrade(hk)
           const isShsTotal = hk.includes('shs') || hk.includes('seniorhigh')
-          const matchesSpec = spec.keys.some(k => hk.includes(k))
+          
+          let matchesSpec = false
+          if (spec.keys.includes('regular')) {
+            // Use regex for "regular" to avoid matching "irregular"
+            matchesSpec = spec.keys.some(k => 
+              k === 'regular' ? /(?:^|[^a-z])regular(?:[^a-z]|$)/.test(hk) : hk.includes(k)
+            )
+          } else {
+            matchesSpec = spec.keys.some(k => hk.includes(k))
+          }
+          
           const isConditional = hk.includes('cond')
 
           // We want columns that are grade-level specific for this category
@@ -486,14 +393,35 @@ function readFile(file) {
           const matchesSpec = expandedMetricKeys.some(k => hk.includes(k))
           const isConditional = hk.includes('cond')
           const hasTotalVariation = totalVariationTokens.some(t => hk.includes(t))
-          return matchesSpec && hasTotalVariation && !isGenderColumn(hk) && !isConditional
+          
+          // Fix 1: Explicit level exclusion
+          const hasCrossLevelToken = hk.includes('elem') || hk.includes('jhs') || hk.includes('junior') || hk.includes('elementary')
+          
+          return matchesSpec && hasTotalVariation && !isGenderColumn(hk) && !isConditional && !hasCrossLevelToken
         })
-        // Only accept SHS-specific totals; otherwise null to avoid cross-level collisions
-        let existingTotalHeader = candidates.find(h => {
-          const hk = normalizedHeaderMap.get(h)
-          return shsLevelKeywords.some(lk => hk.includes(lk)) &&
-                 spec.keys.some(k => hk.includes(k))
-        }) || null
+
+        // Fix 1: Priority for G11&12 combined totals
+        let existingTotalHeader = null
+        if (spec.label.includes('Enrollment')) {
+          existingTotalHeader = candidates.find(h => {
+            const hk = normalizedHeaderMap.get(h)
+            return hk.includes('g1112') && hk.includes('total') && !isGenderColumn(hk)
+          })
+          if (!existingTotalHeader) {
+            existingTotalHeader = candidates.find(h => {
+              const hk = normalizedHeaderMap.get(h)
+              return hk.includes('g11') && hk.includes('total') && !isGenderColumn(hk)
+            })
+          }
+        }
+
+        if (!existingTotalHeader) {
+          existingTotalHeader = candidates.find(h => {
+            const hk = normalizedHeaderMap.get(h)
+            return shsLevelKeywords.some(lk => hk.includes(lk)) &&
+                   spec.keys.some(k => hk.includes(k))
+          }) || null
+        }
 
         // Step 3: Fallback Total Search
         if (!existingTotalHeader) {
@@ -502,7 +430,8 @@ function readFile(file) {
             const matchesSpec = expandedMetricKeys.some(k => hk.includes(k))
             const isConditional = hk.includes('cond')
             const hasTotal = ['total', 'grand', 'overall', 'eosy'].some(t => hk.includes(t))
-            return matchesSpec && hasTotal && !isConditional
+            const hasCrossLevelToken = hk.includes('elem') || hk.includes('jhs') || hk.includes('junior') || hk.includes('elementary')
+            return matchesSpec && hasTotal && !isConditional && !hasCrossLevelToken
           })
           if (fallbackTotal) {
             existingTotalHeader = fallbackTotal
@@ -530,7 +459,11 @@ function readFile(file) {
           const matchesSpec = expandedMetricKeys.some(k => hk.includes(k))
           const isConditional = hk.includes('cond')
           const hasTotalVariation = totalVariationTokens.some(t => hk.includes(t))
-          return matchesSpec && hasTotalVariation && !isGenderColumn(hk) && !isConditional
+          
+          // Fix 1: Explicit level exclusion
+          const hasCrossLevelToken = hk.includes('elem') || hk.includes('shs') || hk.includes('senior') || hk.includes('elementary')
+          
+          return matchesSpec && hasTotalVariation && !isGenderColumn(hk) && !isConditional && !hasCrossLevelToken
         })
         let existingTotalHeader = candidates.find(h => {
           const hk = normalizedHeaderMap.get(h)
@@ -545,7 +478,8 @@ function readFile(file) {
             const matchesSpec = expandedMetricKeys.some(k => hk.includes(k))
             const isConditional = hk.includes('cond')
             const hasTotal = ['total', 'grand', 'overall', 'eosy'].some(t => hk.includes(t))
-            return matchesSpec && hasTotal && !isConditional
+            const hasCrossLevelToken = hk.includes('elem') || hk.includes('shs') || hk.includes('senior') || hk.includes('elementary')
+            return matchesSpec && hasTotal && !isConditional && !hasCrossLevelToken
           })
           if (fallbackTotal) {
             existingTotalHeader = fallbackTotal
@@ -572,7 +506,11 @@ function readFile(file) {
           const matchesSpec = expandedMetricKeys.some(k => hk.includes(k))
           const isConditional = hk.includes('cond')
           const hasTotalVariation = totalVariationTokens.some(t => hk.includes(t))
-          return matchesSpec && hasTotalVariation && !isGenderColumn(hk) && !isConditional
+          
+          // Fix 1: Explicit level exclusion
+          const hasCrossLevelToken = hk.includes('jhs') || hk.includes('shs') || hk.includes('senior') || hk.includes('junior')
+          
+          return matchesSpec && hasTotalVariation && !isGenderColumn(hk) && !isConditional && !hasCrossLevelToken
         })
         let existingTotalHeader = candidates.find(h => {
           const hk = normalizedHeaderMap.get(h)
@@ -587,7 +525,8 @@ function readFile(file) {
             const matchesSpec = expandedMetricKeys.some(k => hk.includes(k))
             const isConditional = hk.includes('cond')
             const hasTotal = ['total', 'grand', 'overall', 'eosy'].some(t => hk.includes(t))
-            return matchesSpec && hasTotal && !isConditional
+            const hasCrossLevelToken = hk.includes('jhs') || hk.includes('shs') || hk.includes('senior') || hk.includes('junior')
+            return matchesSpec && hasTotal && !isConditional && !hasCrossLevelToken
           })
           if (fallbackTotal) {
             existingTotalHeader = fallbackTotal
@@ -595,8 +534,6 @@ function readFile(file) {
         }
         return { ...spec, components, existingTotalHeader }
       })
-
-
 
       const processedRows = rows.map((row) => {
         const rowCopy = { ...row }
@@ -838,63 +775,27 @@ function readFile(file) {
           </div>
         </div>
       </div>
-      <div class="grid chart-grid">
-        <div class="card" v-if="regionBarConfig.labels.length">
-          <BaseChart
-            type="bar"
-            title="Number of schools per region"
-            :labels="regionBarConfig.labels"
-            :datasets="regionBarConfig.datasets"
-          />
-        </div>
-        <div class="card" v-if="sectorPieConfig.labels.length">
-          <BaseChart
-            type="pie"
-            title="Sector distribution"
-            :labels="sectorPieConfig.labels"
-            :datasets="sectorPieConfig.datasets"
-          />
-        </div>
-        <div class="card" v-if="schoolTypePerRegionConfig.labels.length">
-          <BaseChart
-            type="bar"
-            title="School type per region"
-            :labels="schoolTypePerRegionConfig.labels"
-            :datasets="schoolTypePerRegionConfig.datasets"
-            :stacked="true"
-          />
-        </div>
-      </div>
       <div class="card completion-rate-card" v-if="completionRatePerSchoolConfig.labels.length">
+        <div class="chart-header-row">
+          <h2 class="chart-title-main">Completion rate per school</h2>
+          <div class="chart-controls-compact">
+            <label class="field-label-row">
+              <span>Orientation:</span>
+              <select class="select select-compact" v-model="completionChartOrientation">
+                <option v-for="opt in orientationOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </label>
+          </div>
+        </div>
         <BaseChart
           type="bar"
-          title="Completion rate per school"
-          index-axis="y"
+          :index-axis="completionChartOrientation"
           :max-value="100"
           :labels="completionRatePerSchoolConfig.labels"
           :datasets="completionRatePerSchoolConfig.datasets"
         />
-        <div class="completion-chart-pagination">
-          <button
-            type="button"
-            class="button button-ghost"
-            :disabled="completionChartPage <= 1"
-            @click="goToPrevCompletionChartPage"
-          >
-            Previous page
-          </button>
-          <div class="completion-chart-page-info">
-            Page {{ completionChartPage }} of {{ completionChartTotalPages }}
-          </div>
-          <button
-            type="button"
-            class="button button-ghost"
-            :disabled="completionChartPage >= completionChartTotalPages"
-            @click="goToNextCompletionChartPage"
-          >
-            Next page
-          </button>
-        </div>
       </div>
       <!-- Completion metrics table hidden for now -->
       <div v-if="false" class="card completion-table-card">
@@ -1003,6 +904,38 @@ function readFile(file) {
 </template>
 
 <style scoped>
+.chart-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.chart-title-main {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.chart-controls-compact {
+  display: flex;
+  align-items: center;
+}
+
+.field-label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #9ca3af;
+}
+
+.select-compact {
+  height: 28px;
+  padding: 0 0.5rem;
+  font-size: 0.8rem;
+}
+
 .dashboard-section {
   display: flex;
   flex-direction: column;

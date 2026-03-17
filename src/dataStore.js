@@ -1031,7 +1031,8 @@ const schoolLevelMetrics = computed(() => {
   const conditionalColumn = measureColumns.value.totalConditional
   
   const groups = new Map()
-  for (const row of filteredRows.value) {
+  // Use sortedRows to respect the table's current sorting
+  for (const row of sortedRows.value) {
     const key = row[schoolColumn] == null || row[schoolColumn] === '' ? 'Unknown' : String(row[schoolColumn])
     if (!groups.has(key)) {
       groups.set(key, {
@@ -1051,6 +1052,7 @@ const schoolLevelMetrics = computed(() => {
   }
   
   const result = []
+  // Maintain the order of schools as they appear in sortedRows
   for (const group of groups.values()) {
     const completionRate = group.totalEnrollment > 0 
       ? (group.totalCompleters / group.totalEnrollment) * 100 
@@ -1061,7 +1063,10 @@ const schoolLevelMetrics = computed(() => {
       completionRate,
     })
   }
-  result.sort((a, b) => b.totalEnrollment - a.totalEnrollment)
+  // If no sort state is active, use totalEnrollment as default sort
+  if (state.sortState.length === 0) {
+    result.sort((a, b) => b.totalEnrollment - a.totalEnrollment)
+  }
   return result
 })
 
@@ -1083,6 +1088,7 @@ export function useDataStore() {
     setGradeLevelFilter,
     filteredRows,
     sortedRows,
+    filteredSortedRows: sortedRows,
     pagedRows,
     totalPages,
     columnDistinctValues,
